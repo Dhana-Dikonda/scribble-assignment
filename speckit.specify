@@ -79,12 +79,24 @@ The "Start Game" button is only enabled for the host and only when at least 2 pl
 
 ---
 
+### User Story 5 — Game Start & Drawer Flow (Priority: P1)
+
+Once the game is started by the host, the game transitions into the first round. The host (drawer) is assigned the `"drawer"` role and shown the secret word deterministically selected from the starter list. All other players are guessers; they do not see the secret word and can type guesses.
+
+**Why this priority**: Correctly assigning the drawer role and isolating the secret word is the base of the drawing/guessing game loop.
+
+**Independent Test**: Open two tabs. Start the game. Tab 1 (Host/Drawer) sees "Your word to draw: Castle" and has the guess input disabled. Tab 2 (Guesser) sees "Alice is drawing..." and has the guess input active (with no secret word displayed).
+
+---
+
 ## Edge Cases
 
 - What happens when the room code is valid in format but has mixed case? → Codes are normalized to uppercase on both the backend (`code.toUpperCase()`) and frontend input before any API call.
 - What happens when a player navigates directly to `/lobby` without a session? → The frontend detects `room === null` in the store and redirects to `/` immediately.
 - What happens when the same player tries to join the same room twice? → Each call to `POST /rooms/:code/join` creates a new participant entry. Duplicate-join prevention is out of scope for this scenario.
 - What happens when the room code alphabet produces a collision? → `generateUniqueCode()` in `roomStore.ts` already handles this with a retry loop.
+- What happens when a player navigates directly to `/game` without a session? → The frontend detects `room === null` and redirects to `/` immediately.
+- What happens when a player refreshes the page during the game? → The page reloads, hooks run, first fetch on mount restores room state, and polling resumes without breaking the flow.
 
 ---
 
@@ -104,10 +116,18 @@ The "Start Game" button is only enabled for the host and only when at least 2 pl
 - **FR-110**: Rooms MUST be fully isolated — `GET /rooms/:code` returns only participants belonging to that room's code.
 - **FR-111**: `POST /rooms/:code/start` MUST return `400` with `{ message: "Game already started" }` if `room.status` is not `"lobby"` at the time of the call, preventing double-start race conditions.
 - **FR-112**: Background lobby polls MUST NOT trigger a visible loading state in the UI. Only the initial mount fetch may show a loading indicator.
+- **FR-201**: When the game starts, the backend MUST assign the `"drawer"` role to the host player and `"guesser"` to all other players in `roles`.
+- **FR-202**: At game start, the backend MUST deterministically select a secret word from `STARTER_WORDS` using the formula `STARTER_WORDS[room.participants.length % STARTER_WORDS.length]` and store it on the room.
+- **FR-203**: The backend `toRoomSnapshot()` function MUST only include the secret word in `availableWords` (as `[secretWord]`) if the requesting participant is the host (drawer). For guessers, `availableWords` MUST be `[]`.
+- **FR-204**: The GamePage component MUST fetch `GET /rooms/:code` once immediately on mount, then poll at approximately 2-second intervals.
+- **FR-205**: The GamePage component MUST identify the drawer by name to all players (e.g. "Alice is drawing..." for guessers).
+- **FR-206**: The GamePage component MUST display the secret word only to the drawer (host).
+- **FR-207**: The GuessForm component MUST be disabled for the drawer (host) and enabled for guessers.
+- **FR-208**: The polling interval on GamePage MUST be cleared when the component unmounts.
 
 ### Key Entities
 
-- **Room**: `code` (4-char uppercase), `status` (`"lobby" | "game" | "results"`), `hostId` (string — participant ID of creator), `participants` (array), `createdAt`, `updatedAt`.
+- **Room**: `code` (4-char uppercase), `status` (`"lobby" | "game" | "results"`), `hostId` (string), `participants` (array), `secretWord` (string — optional), `createdAt`, `updatedAt`.
 - **Participant**: `id` (UUID), `name` (trimmed, non-empty string), `joinedAt` (ISO timestamp).
 
 ---
@@ -120,6 +140,9 @@ The "Start Game" button is only enabled for the host and only when at least 2 pl
 - **SC-104**: Entering an invalid room code or empty name produces a visible, specific error message — no silent failures.
 - **SC-105**: Two simultaneously active rooms maintain completely separate participant lists.
 - **SC-106**: Clicking Start Game navigates all lobby participants to the game screen.
+- **SC-201**: Start Game triggers assignment of drawer role to host, and guesser roles to others.
+- **SC-202**: Secret word is deterministically selected and only returned to the host (drawer) in the RoomSnapshot.
+- **SC-203**: Guess input is disabled for the drawer, and enabled for guessers with clear instructions showing who is drawing.
 
 ---
 
@@ -131,3 +154,4 @@ The "Start Game" button is only enabled for the host and only when at least 2 pl
 - The `POST /rooms/:code/start` endpoint will be new — it does not exist in the starter.
 - `RoomStatus` will be extended from `"lobby"` to `"lobby" | "game" | "results"` in `backend/src/models/game.ts`.
 - Duplicate-join (same player joining twice) produces a separate participant entry; deduplication is out of scope.
+- The secret word index is computed modulo `STARTER_WORDS.length` to avoid out-of-bounds access.

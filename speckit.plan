@@ -178,60 +178,61 @@ Changes must be applied in this order to avoid breaking the running app at any s
   - Set `room.status = "game"`; call `saveRoom(room)`; return `{ room: snapshot }`
 
 #### [MODIFY] `backend/src/api/rooms.ts`
-- Add `POST /:code/start` handler:
-  - Parse params with `roomCodeParamsSchema`
-  - Parse body with `startRoomSchema`
-  - Call `startRoom(code, participantId)`
-  - Return `404` for not_found, `400` for already_started or not_enough_players, `403` for forbidden, `200` with snapshot on success
+- Add `POST /:code/start` handler (implemented in Scenario 1).
+
+#### [MODIFY] `backend/src/models/game.ts`
+- Add `secretWord?: string` to `Room` interface.
+
+#### [MODIFY] `backend/src/services/roomStore.ts`
+- In `startRoom()`:
+  - Deterministically pick a word: `room.secretWord = STARTER_WORDS[room.participants.length % STARTER_WORDS.length]`.
+- In `toRoomSnapshot(room, viewerParticipantId)`:
+  - Map roles: host gets `"drawer"`, others get `"guesser"`.
+  - For `status === "game"`, if `viewerParticipantId === room.hostId`, return `[room.secretWord]` as `availableWords`. Otherwise, return `[]`.
+  - For `status === "results"`, return `[room.secretWord]` to all players.
 
 ---
 
 ### Frontend
 
 #### [MODIFY] `frontend/src/services/api.ts`
-- Fix base URL: change `/bug` suffix to remove it → `http://localhost:3001`
-- Add `hostId: string` to `RoomSnapshot` interface
-- Extend `status` type to `"lobby" | "game" | "results"`
-- Add `api.startGame(code, participantId)` method → `POST /rooms/:code/start`
+- Ensure mirrored snap has correct properties (done).
 
 #### [MODIFY] `frontend/src/state/roomStore.ts`
-- Add `startGame()` async method to `RoomStore`:
-  - Guard: return if no room or no participantId
-  - Call `api.startGame(room.code, participantId)`
-  - Call `setRoomSnapshot(response.room)`
+- Ensure mirrored functions are available.
 
-#### [MODIFY] `frontend/src/pages/LobbyPage.tsx`
-- Remove manual "Refresh Room" button (or keep as fallback — constitution allows minor overrides)
-- Add `useEffect` that:
-  1. Calls `api.fetchRoom()` **immediately on mount** (using `isLoading` only for this initial call — FR-104)
-  2. Sets up `setInterval` at 2000ms for background polls (FR-112: background polls call `api.fetchRoom()` directly, bypassing `withLoading` so `isLoading` is not set)
-  3. Clears the interval in the cleanup function
-- After each fetch/poll: if `room.status === "game"`, call `navigate("/game")`
-- Derive `isHost`: `const isHost = room.hostId === participantId` (type is available after Phase 1 T003–T005)
-- Render Start Game button only when `isHost === true`
-- Disable Start Game button when `room.participants.length < 2`
-- Wire Start Game button to call `roomStore.startGame()` then `navigate("/game")`
+#### [MODIFY] `frontend/src/pages/GamePage.tsx`
+- Implement active polling mechanism:
+  - Poll every 2 seconds via `setInterval` calling `roomStore.fetchRoom()`.
+  - If status becomes `"lobby"`, navigate back to `/lobby`.
+- Derive role: `const isDrawer = participantId === room.hostId`.
+- Derive drawer name: `const drawerName = room.participants.find(p => p.id === room.hostId)?.name || "Host"`.
+- UI updates:
+  - Drawer sees: "Your word to draw: {room.availableWords[0]}"
+  - Guesser sees: "{drawerName} is drawing..."
+  - Pass `disabled={isDrawer}` to `GuessForm`.
+
+#### [MODIFY] `frontend/src/components/GuessForm.tsx`
+- Add support for `disabled` prop so input and button are properly disabled when drawer is viewing.
 
 ---
 
 ## Testing Strategy
 
 ### Automated
-- `backend/src/services/roomStore.test.ts`: add tests for `startRoom()` — forbidden path, not-enough-players path, success path
-- `backend/src/api/schemas.test.ts`: add tests that empty/whitespace names fail validation
-- `frontend/src/services/api.test.ts`: add test that base URL resolves correctly (no `/bug`)
+- `backend/src/services/roomStore.test.ts`:
+  - Add test: `startRoom()` sets deterministic word based on participant count.
+  - Add test: `toRoomSnapshot()` returns secret word only for the drawer.
+- `backend/src/api/schemas.test.ts`: existing schema validation tests.
+- `frontend/src/services/api.test.ts`: existing URL prefix check.
 
 ### Manual (2-tab verification)
-1. Start backend and frontend
-2. Tab 1: Create room with name `"Alice"` → land on Lobby → note room code
-3. Tab 1: Confirm Start Game button is disabled (1 player)
-4. Tab 2: Join with name `"Bob"` and the room code → land on Lobby
-5. Tab 1: Within ~2s, confirm "Bob" appears automatically without clicking Refresh
-6. Tab 1: Confirm Start Game button is now enabled
-7. Tab 2: Confirm Start Game button is disabled/hidden
-8. Tab 1: Click Start Game → both tabs navigate to Game screen
-9. Test invalid join: Tab 3 tries code `"XXXX"` → confirm "Room not found" error
-10. Test empty name: Submit create/join with blank name → confirm error message shown
+1. Start backend and frontend.
+2. Tab 1: Create room with name `"Alice"` (Host) -> note room code.
+3. Tab 2: Join room with name `"Bob"` and code.
+4. Tab 1: Start game -> both tabs navigate to `/game`.
+5. Tab 1 (Alice): Verify "Your word to draw: castle" (or other deterministic word) is shown. Verify guess input is disabled.
+6. Tab 2 (Bob): Verify "Alice is drawing..." is shown. Verify guess input is enabled. Verify secret word is NOT displayed.
 
 ---
 
@@ -243,3 +244,4 @@ Changes must be applied in this order to avoid breaking the running app at any s
 | `setInterval` drift over time causes requests to stack | Clear previous interval before setting a new one; guard against concurrent fetches |
 | Non-host accidentally calls `/start` if UI bug exists | Backend enforces `hostId` check — 403 returned regardless of UI state |
 | Base URL fix breaks existing local dev setup | Fix is a 1-char change removing `/bug`; no env var needed for default local dev |
+| Secret word exposed in JS bundle or page source | Snapshot filtering ensures the secret word is only sent over the network to the drawer's client |

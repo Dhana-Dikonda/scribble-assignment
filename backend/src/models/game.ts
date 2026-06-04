@@ -12,6 +12,7 @@ export interface Room {
   status: RoomStatus;
   hostId: string;
   participants: Participant[];
+  secretWord?: string;
   createdAt: string;
   updatedAt: string;
 }

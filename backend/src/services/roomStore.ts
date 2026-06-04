@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import type { Participant, Room, RoomSnapshot } from "../models/game.js";
-import { STARTER_ROLES, STARTER_WORDS } from "../seed/starterData.js";
+import type { Participant, ParticipantRole, Room, RoomSnapshot } from "../models/game.js";
+import { STARTER_WORDS } from "../seed/starterData.js";
 
 const rooms = new Map<string, Room>();
 
@@ -100,15 +100,32 @@ export function saveRoom(room: Room) {
 }
 
 export function toRoomSnapshot(room: Room, viewerParticipantId?: string): RoomSnapshot {
-  void viewerParticipantId;
+  let roles: ParticipantRole[] = room.participants.map(() => "guesser");
+  let availableWords: string[] = [];
+
+  if (room.status === "game" || room.status === "results") {
+    roles = room.participants.map((p) => (p.id === room.hostId ? "drawer" : "guesser"));
+
+    if (room.status === "game") {
+      if (viewerParticipantId === room.hostId && room.secretWord) {
+        availableWords = [room.secretWord];
+      } else {
+        availableWords = [];
+      }
+    } else {
+      if (room.secretWord) {
+        availableWords = [room.secretWord];
+      }
+    }
+  }
 
   return {
     code: room.code,
     status: room.status,
     hostId: room.hostId,
     participants: room.participants.map((participant) => ({ ...participant })),
-    availableWords: listWords(),
-    roles: [...STARTER_ROLES]
+    availableWords,
+    roles
   };
 }
 
@@ -136,7 +153,8 @@ export function startRoom(code: string, participantId: string): StartRoomResult 
   }
 
   room.status = "game";
+  room.secretWord = STARTER_WORDS[room.participants.length % STARTER_WORDS.length];
   saveRoom(room);
 
-  return { room: toRoomSnapshot(room) };
+  return { room: toRoomSnapshot(room, participantId) };
 }
