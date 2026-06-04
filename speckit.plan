@@ -1,0 +1,245 @@
+# Implementation Plan: Scenario 1 — Room Setup & Lobby
+
+**Branch**: `scribble-lab` | **Date**: 2026-06-04 | **Spec**: `speckit.specify`
+
+---
+
+## Summary
+
+Add host tracking to the room model, tighten input validation, implement automatic lobby polling on the frontend, and add a host-only `POST /rooms/:code/start` endpoint that transitions the room from `"lobby"` to `"game"` and triggers navigation for all participants.
+
+All changes are brownfield — existing routes and components are extended, not replaced.
+
+---
+
+## Technical Context
+
+**Language/Version**: TypeScript (Node 18+, React 18)
+
+**Primary Dependencies**: Express (backend), React + React Router v6 (frontend), Zod (validation), Vite (dev server)
+
+**Storage**: In-memory `Map<string, Room>` — no persistence
+
+**Testing**: Vitest (both `backend/vitest.config.ts` and `frontend/vitest.config.ts`)
+
+**Target Platform**: Local dev — backend `localhost:3001`, frontend `localhost:5173`
+
+**Project Type**: Fullstack web app — REST API + React SPA
+
+---
+
+## Findings from Discovery
+
+| # | Gap | Location |
+|---|-----|----------|
+| 1 | `Room` model has no `hostId` field | `backend/src/models/game.ts` |
+| 2 | `RoomStatus` is `"lobby"` only — no `"game"` or `"results"` | `backend/src/models/game.ts` |
+| 3 | Name schemas use `.optional()` — empty/whitespace names accepted | `backend/src/api/schemas.ts` |
+| 4 | No `POST /rooms/:code/start` endpoint | `backend/src/api/rooms.ts` |
+| 5 | `toRoomSnapshot` ignores `viewerParticipantId` — can't expose `hostId` | `backend/src/services/roomStore.ts` |
+| 6 | Lobby uses a manual refresh button — no polling interval | `frontend/src/pages/LobbyPage.tsx` |
+| 7 | Start Game button is always enabled, shown to all players | `frontend/src/pages/LobbyPage.tsx` |
+| 8 | API base URL defaults to `http://localhost:3001/bug` | `frontend/src/services/api.ts` L22 |
+| 9 | Frontend `RoomSnapshot` type has no `hostId` | `frontend/src/services/api.ts` |
+
+---
+
+## State Model Changes
+
+### Backend — `Room` (extended)
+
+```
+Room {
+  code:         string          // 4-char uppercase
+  status:       "lobby" | "game" | "results"   // ← extended
+  hostId:       string          // ← NEW: participantId of creator
+  participants: Participant[]
+  createdAt:    string
+  updatedAt:    string
+}
+```
+
+### Backend — `RoomSnapshot` (extended)
+
+```
+RoomSnapshot {
+  code:         string
+  status:       "lobby" | "game" | "results"   // ← extended
+  hostId:       string          // ← NEW: exposed to clients
+  participants: Participant[]
+  availableWords: string[]
+  roles:        ParticipantRole[]
+}
+```
+
+### Frontend — `RoomSnapshot` (mirrored)
+
+```
+RoomSnapshot {
+  code:     string
+  status:   "lobby" | "game" | "results"   // ← extended
+  hostId:   string                          // ← NEW
+  participants: Participant[]
+  availableWords: string[]
+  roles:    ParticipantRole[]
+}
+```
+
+---
+
+## Data Flow
+
+### Create Room
+```
+CreateRoomPage → roomStore.createRoom(name)
+  → POST /rooms { playerName: trimmed name }
+  → backend validates (non-empty after trim)
+  → createRoom() sets room.hostId = participant.id
+  → toRoomSnapshot() includes hostId
+  → 201 { participantId, room: RoomSnapshot }
+  → store.setRoomSession() → navigate("/lobby")
+```
+
+### Join Room
+```
+JoinRoomPage → roomStore.joinRoom(code, name)
+  → POST /rooms/:code/join { playerName: trimmed name }
+  → backend validates name + code existence
+  → 200 { participantId, room: RoomSnapshot }
+  → store.setRoomSession() → navigate("/lobby")
+```
+
+### Lobby Poll (new)
+```
+LobbyPage mounts
+  → setInterval(fetchRoom, 2000)
+  → GET /rooms/:code?participantId=xxx
+  → store.setRoomSnapshot(room)
+  → if room.status === "game" → navigate("/game")
+LobbyPage unmounts → clearInterval
+```
+
+### Start Game (new)
+```
+Host clicks "Start Game"
+  → POST /rooms/:code/start { participantId }
+  → backend checks participantId === room.hostId
+  → backend checks participants.length >= 2
+  → room.status = "game"
+  → 200 { room: RoomSnapshot }
+  → store.setRoomSnapshot() → navigate("/game")
+Non-host players: lobby poll detects status "game" → navigate("/game")
+```
+
+---
+
+## Implementation Sequence
+
+Changes must be applied in this order to avoid breaking the running app at any step:
+
+1. Fix API base URL bug (frontend `api.ts`)
+2. Extend `RoomStatus` type and `Room`/`RoomSnapshot` models (backend `game.ts`)
+3. Mirror `RoomSnapshot` type update in frontend `api.ts`
+4. Tighten Zod name validation schemas (backend `schemas.ts`)
+5. Add `hostId` to `createRoom()` in `roomStore.ts` (backend)
+6. Update `toRoomSnapshot()` to include `hostId` (backend)
+7. Add `POST /rooms/:code/start` route handler (backend `rooms.ts`)
+8. Register the new route — already covered by `createRoomsRouter()` mounting at `/rooms`
+9. Replace manual Lobby refresh with `setInterval` polling (frontend `LobbyPage.tsx`)
+10. Add host detection and Start Game button logic (frontend `LobbyPage.tsx`)
+11. Add auto-navigate when poll returns `status === "game"` (frontend `LobbyPage.tsx`)
+12. Add `startGame()` method to `RoomStore` (frontend `roomStore.ts`)
+13. Add `api.startGame()` method (frontend `api.ts`)
+
+---
+
+## File-Level Plan
+
+### Backend
+
+#### [MODIFY] `backend/src/models/game.ts`
+- Extend `RoomStatus` from `"lobby"` to `"lobby" | "game" | "results"`
+- Add `hostId: string` to `Room` interface
+- Add `hostId: string` to `RoomSnapshot` interface
+
+#### [MODIFY] `backend/src/api/schemas.ts`
+- Change `createRoomSchema.playerName` from `z.string().optional()` to `z.string().min(1, "Name is required").transform(s => s.trim()).refine(s => s.length > 0, "Name cannot be blank")`
+- Apply same change to `joinRoomSchema.playerName`
+- Add `startRoomSchema` for `POST /rooms/:code/start`: `z.object({ participantId: z.string().min(1) })`
+
+#### [MODIFY] `backend/src/services/roomStore.ts`
+- In `createRoom()`: set `room.hostId = participant.id`
+- In `toRoomSnapshot()`: include `hostId: room.hostId` in the returned snapshot
+- Add `startRoom(code, participantId)` function:
+  - Fetch room; return `{ error: "not_found" }` if not found
+  - Return `{ error: "already_started" }` if `room.status !== "lobby"` (FR-111)
+  - Return `{ error: "forbidden" }` if `participantId !== room.hostId`
+  - Return `{ error: "not_enough_players" }` if `participants.length < 2`
+  - Set `room.status = "game"`; call `saveRoom(room)`; return `{ room: snapshot }`
+
+#### [MODIFY] `backend/src/api/rooms.ts`
+- Add `POST /:code/start` handler:
+  - Parse params with `roomCodeParamsSchema`
+  - Parse body with `startRoomSchema`
+  - Call `startRoom(code, participantId)`
+  - Return `404` for not_found, `400` for already_started or not_enough_players, `403` for forbidden, `200` with snapshot on success
+
+---
+
+### Frontend
+
+#### [MODIFY] `frontend/src/services/api.ts`
+- Fix base URL: change `/bug` suffix to remove it → `http://localhost:3001`
+- Add `hostId: string` to `RoomSnapshot` interface
+- Extend `status` type to `"lobby" | "game" | "results"`
+- Add `api.startGame(code, participantId)` method → `POST /rooms/:code/start`
+
+#### [MODIFY] `frontend/src/state/roomStore.ts`
+- Add `startGame()` async method to `RoomStore`:
+  - Guard: return if no room or no participantId
+  - Call `api.startGame(room.code, participantId)`
+  - Call `setRoomSnapshot(response.room)`
+
+#### [MODIFY] `frontend/src/pages/LobbyPage.tsx`
+- Remove manual "Refresh Room" button (or keep as fallback — constitution allows minor overrides)
+- Add `useEffect` that:
+  1. Calls `api.fetchRoom()` **immediately on mount** (using `isLoading` only for this initial call — FR-104)
+  2. Sets up `setInterval` at 2000ms for background polls (FR-112: background polls call `api.fetchRoom()` directly, bypassing `withLoading` so `isLoading` is not set)
+  3. Clears the interval in the cleanup function
+- After each fetch/poll: if `room.status === "game"`, call `navigate("/game")`
+- Derive `isHost`: `const isHost = room.hostId === participantId` (type is available after Phase 1 T003–T005)
+- Render Start Game button only when `isHost === true`
+- Disable Start Game button when `room.participants.length < 2`
+- Wire Start Game button to call `roomStore.startGame()` then `navigate("/game")`
+
+---
+
+## Testing Strategy
+
+### Automated
+- `backend/src/services/roomStore.test.ts`: add tests for `startRoom()` — forbidden path, not-enough-players path, success path
+- `backend/src/api/schemas.test.ts`: add tests that empty/whitespace names fail validation
+- `frontend/src/services/api.test.ts`: add test that base URL resolves correctly (no `/bug`)
+
+### Manual (2-tab verification)
+1. Start backend and frontend
+2. Tab 1: Create room with name `"Alice"` → land on Lobby → note room code
+3. Tab 1: Confirm Start Game button is disabled (1 player)
+4. Tab 2: Join with name `"Bob"` and the room code → land on Lobby
+5. Tab 1: Within ~2s, confirm "Bob" appears automatically without clicking Refresh
+6. Tab 1: Confirm Start Game button is now enabled
+7. Tab 2: Confirm Start Game button is disabled/hidden
+8. Tab 1: Click Start Game → both tabs navigate to Game screen
+9. Test invalid join: Tab 3 tries code `"XXXX"` → confirm "Room not found" error
+10. Test empty name: Submit create/join with blank name → confirm error message shown
+
+---
+
+## Risks & Mitigations
+
+| Risk | Mitigation |
+|------|-----------|
+| Polling interval leaks if component re-mounts rapidly | Use `useRef` to hold interval ID; clear in cleanup |
+| `setInterval` drift over time causes requests to stack | Clear previous interval before setting a new one; guard against concurrent fetches |
+| Non-host accidentally calls `/start` if UI bug exists | Backend enforces `hostId` check — 403 returned regardless of UI state |
+| Base URL fix breaks existing local dev setup | Fix is a 1-char change removing `/bug`; no env var needed for default local dev |

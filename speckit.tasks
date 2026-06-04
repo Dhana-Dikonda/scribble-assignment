@@ -1,0 +1,184 @@
+# Tasks: Scenario 1 — Room Setup & Lobby
+
+**Spec**: `speckit.specify` | **Plan**: `speckit.plan` | **Date**: 2026-06-04
+
+---
+
+## Phase 1: Foundational — Shared Infrastructure
+
+**Purpose**: Fix the baseline bug and extend shared types that all user stories depend on. Must be complete before any story work begins.
+
+**⚠️ CRITICAL**: No user story work can begin until this phase is complete.
+
+- [ ] T001 Fix API base URL bug in `frontend/src/services/api.ts` L22 — remove `/bug` suffix so default resolves to `http://localhost:3001`
+- [ ] T002 Extend `RoomStatus` type in `backend/src/models/game.ts` from `"lobby"` to `"lobby" | "game" | "results"`
+- [ ] T003 Add `hostId: string` field to `Room` interface in `backend/src/models/game.ts`
+- [ ] T004 Add `hostId: string` field to `RoomSnapshot` interface in `backend/src/models/game.ts`
+- [ ] T005 [P] Mirror `RoomSnapshot` changes in `frontend/src/services/api.ts` — add `hostId: string` and extend `status` union type
+
+**Checkpoint**: Types compile cleanly. Both `npm run build` in `/backend` and `/frontend` pass with no type errors.
+
+---
+
+## Phase 2: User Story 1 — Create Room & Host Assignment (Priority: P1) 🎯
+
+**Goal**: A player creates a room with a valid name and is automatically designated as the host.
+
+**Independent Test**: One browser tab — create a room, confirm the Lobby shows the room code and the first participant is the host.
+
+### Backend — Name Validation & Host Assignment
+
+- [ ] T006 [US1] Tighten `createRoomSchema.playerName` in `backend/src/api/schemas.ts`:
+  - Change from `z.string().optional()` to `z.string().min(1).transform(s => s.trim()).refine(s => s.length > 0, { message: "Player name cannot be blank" })`
+- [ ] T007 [US1] Update `createRoom()` in `backend/src/services/roomStore.ts` to set `room.hostId = participant.id` when creating the room
+- [ ] T008 [US1] Update `toRoomSnapshot()` in `backend/src/services/roomStore.ts` to include `hostId: room.hostId` in the returned snapshot
+- [ ] T009 [US1] Add unit test to `backend/src/services/roomStore.test.ts` verifying that `createRoom()` sets `hostId` to the first participant's ID
+
+### Frontend — Create Room Error Display
+
+- [ ] T010 [US1] Verify `CreateRoomPage.tsx` already displays the `error` state from `roomStore` — no change needed if error is shown; add inline error display if missing
+- [ ] T011 [US1] Add client-side trim + empty check in `CreateRoomPage.tsx` before calling `roomStore.createRoom()` to catch blank names before the API call
+- [ ] T011a [US1] After T006 is done, remove or annotate the `displayName()` fallback in `backend/src/services/roomStore.ts` — it becomes dead code once Zod rejects empty names; add a comment clarifying it's a last-resort safeguard
+
+**Checkpoint**: Create a room with a valid name → Lobby loads. Create with blank name → inline error shown, no navigation.
+
+---
+
+## Phase 3: User Story 2 — Join Room by Code (Priority: P1) 🎯
+
+**Goal**: A second player joins using a shared room code; invalid/empty inputs are rejected with clear messages; rooms are fully isolated.
+
+**Independent Test**: Two browser tabs — Tab 1 creates, Tab 2 joins using the code. Both see each other in the participant list after a refresh.
+
+### Backend — Join Validation
+
+- [ ] T012 [US2] Tighten `joinRoomSchema.playerName` in `backend/src/api/schemas.ts` with the same trim + refine logic as T006
+- [ ] T013 [US2] Add unit test to `backend/src/api/schemas.test.ts` verifying that empty and whitespace-only names fail validation for both `createRoomSchema` and `joinRoomSchema`
+- [ ] T014 [US2] Verify the existing `joinRoom()` handler in `backend/src/api/rooms.ts` returns `404` for unknown room codes — no code change needed if already correct; add explicit test confirming this
+
+### Frontend — Join Room Error Display
+
+- [ ] T015 [US2] Add client-side validation in `JoinRoomPage.tsx`:
+  - Reject empty or whitespace-only player name before API call
+  - Reject empty or whitespace-only room code before API call
+  - Show a specific inline error for each case
+- [ ] T016 [US2] Confirm `JoinRoomPage.tsx` displays the error returned from `roomStore.joinRoom()` (e.g., "Room not found") — already present; verify it works end-to-end
+- [ ] T016a [US2] Verify room code normalisation (FR-103) — test that `POST /rooms/:code/join` with a lowercase code (e.g., `abcd`) resolves to the same room as uppercase `ABCD`; add a unit test in `backend/src/api/schemas.test.ts` or `roomStore.test.ts` confirming this
+
+**Checkpoint**: Join with valid name + valid code → Lobby loads. Join with blank name → error shown. Join with unknown code → "Room not found" shown.
+
+---
+
+## Phase 4: User Story 3 — Automatic Lobby Polling (Priority: P2)
+
+**Goal**: The Lobby participant list updates automatically every ~2 seconds without user interaction.
+
+**Independent Test**: Tab 1 is in Lobby. Tab 2 joins. Within ~2s Tab 1 shows Tab 2 without clicking Refresh.
+
+### Frontend — Polling Interval
+
+- [ ] T017 [US3] Add a `useEffect` to `frontend/src/pages/LobbyPage.tsx` that:
+  - Calls `api.fetchRoom(code, participantId)` **immediately on mount** and updates the store via `store.setRoomSnapshot()` — this is the only fetch that may reflect `isLoading` (FR-104)
+  - Sets up `setInterval` at 2000ms for background polls — background polls call `api.fetchRoom()` directly and call `store.setRoomSnapshot()` without going through `withLoading`, so `isLoading` is never set (FR-112 — no UI flicker)
+  - Stores the interval ID in a `useRef`
+  - Clears the interval in the cleanup function (`return () => clearInterval(ref.current)`)
+- [ ] T018 [US3] After each fetch/poll result, check if `room.status === "game"` and call `navigate("/game")` if true
+- [ ] T018a [US3] Handle errors in both the mount fetch and the interval callback — catch thrown errors, display a non-blocking status note (e.g., "Unable to refresh — retrying…"), and allow the next interval to continue (do not clear the interval on error; do not crash the page)
+- [ ] T019 [US3] Remove (or comment out) the manual "Refresh Room" button from `LobbyPage.tsx` since polling replaces it — or leave as a fallback with a note
+- [ ] T020 [US3] Add `fetchRoom()` guard in `frontend/src/state/roomStore.ts`: skip the API call if a fetch is already in flight (prevent request stacking on slow networks)
+
+**Checkpoint**: Tab 1 creates room, Tab 2 joins. Tab 1 participant list updates within ~2s automatically. Navigating away from Lobby stops the polling (verify in browser DevTools — no more requests).
+
+---
+
+## Phase 5: User Story 4 — Host-Only Start with 2-Player Minimum (Priority: P2)
+
+**Goal**: Only the host sees an enabled Start Game button; it is disabled until ≥2 players are present; all players auto-navigate to `/game` on start.
+
+**Independent Test**: Tab 1 (host) — Start Game disabled with 1 player, enabled after Tab 2 joins. Tab 2 — Start Game hidden/disabled. Tab 1 clicks Start → both tabs navigate to `/game`.
+
+### Backend — Start Endpoint
+
+- [ ] T021 [US4] Add `startRoomSchema` to `backend/src/api/schemas.ts`:
+  ```
+  z.object({ participantId: z.string().min(1) })
+  ```
+- [ ] T022 [US4] Add `startRoom(code, participantId)` function to `backend/src/services/roomStore.ts`:
+  - Fetch room by code; return `{ error: "not_found" }` if missing
+  - Return `{ error: "already_started" }` if `room.status !== "lobby"` (FR-111 — double-start guard)
+  - Return `{ error: "forbidden" }` if `participantId !== room.hostId`
+  - Return `{ error: "not_enough_players" }` if `room.participants.length < 2`
+  - Set `room.status = "game"`; call `saveRoom(room)`; return `{ room: snapshot }`
+- [ ] T023 [US4] Add unit tests to `backend/src/services/roomStore.test.ts` for `startRoom()`:
+  - Non-host attempt → `"forbidden"`
+  - Only 1 player → `"not_enough_players"`
+  - Room already in `"game"` status → `"already_started"`
+  - Valid host with 2+ players → status becomes `"game"`
+- [ ] T024 [US4] Add `POST /:code/start` route handler to `backend/src/api/rooms.ts`:
+  - Parse params with `roomCodeParamsSchema`
+  - Parse body with `startRoomSchema`
+  - Map `startRoom()` results: `"not_found"` → 404, `"already_started"` → 400, `"forbidden"` → 403, `"not_enough_players"` → 400, success → 200 with room snapshot
+
+### Frontend — Host Detection & Start Game Button
+
+- [ ] T025 [US4] Add `api.startGame(code, participantId)` method to `frontend/src/services/api.ts`:
+  - `POST /rooms/:code/start` with `{ participantId }` in body
+  - Returns `{ room: RoomSnapshot }`
+- [ ] T026 [US4] Add `startGame()` async method to `RoomStore` in `frontend/src/state/roomStore.ts`:
+  - Guard: return early if `room` or `participantId` is null
+  - Call `api.startGame(room.code, participantId)`
+  - Call `setRoomSnapshot(response.room)`
+- [ ] T027 [US4] Update `frontend/src/pages/LobbyPage.tsx`:
+  - Derive `isHost`: `const isHost = room.hostId === participantId`
+  - Render Start Game button only when `isHost === true`
+  - Disable Start Game button when `room.participants.length < 2`, with label "Need at least 2 players"
+  - On click: call `await roomStore.startGame()` then `navigate("/game")`
+  - Show loading/error state if `startGame()` throws
+
+**Checkpoint**: Full 2-tab validation per Manual Verification steps in `speckit.plan`.
+
+---
+
+## Phase 6: Build Validation & Commit
+
+- [ ] T028 Run `cd backend && npm run build` — must exit 0 with no type errors
+- [ ] T029 Run `cd frontend && npm run build` — must exit 0 with no type errors
+- [ ] T030 [P] Run `cd backend && npm run test` — all existing tests pass; new tests pass
+- [ ] T031 [P] Run `cd frontend && npm run test` — all existing tests pass
+- [ ] T032 Commit all changes with message: `feat(scenario-1): room setup, host tracking, lobby polling, start game`
+- [ ] T033 Push branch to `origin/scribble-lab`
+
+---
+
+## Dependencies & Execution Order
+
+```
+Phase 1 (T001–T005)          ← must complete first, blocks everything
+    │
+    ├── Phase 2 (T006–T011)  ← US1: Create Room (P1, start here)
+    │       │
+    │       └── Phase 3 (T012–T016)  ← US2: Join Room (P1, can overlap with Phase 2 on backend)
+    │               │
+    │               ├── Phase 4 (T017–T020)  ← US3: Polling (P2)
+    │               │
+    │               └── Phase 5 (T021–T027)  ← US4: Start Game (P2, backend + frontend in parallel)
+    │                       │
+    └───────────────────────└── Phase 6 (T028–T033)  ← Validation & commit
+```
+
+### Parallel opportunities
+- T005 (frontend type mirror) can be done in parallel with T003–T004
+- T013 (schema tests) can be written in parallel with T012 (schema changes)
+- T023 (startRoom tests) can be written in parallel with T022 (startRoom implementation)
+- T028–T031 (builds + tests) can all run in parallel once implementation is done
+- T025–T026 (frontend API + store for start) can be done in parallel with T021–T024 (backend start endpoint)
+
+---
+
+## Notes
+
+- Each phase has an explicit **checkpoint** — do not proceed to the next phase until the checkpoint passes.
+- Every task maps to at least one requirement in `speckit.specify` (FR-101 through FR-110).
+- Tasks marked `[P]` touch different files and have no shared write conflicts.
+- Keep commits granular — one logical change per commit where possible.
+- If a task reveals new gaps not covered in `discovery.md`, update `discovery.md` before continuing.

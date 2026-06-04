@@ -27,6 +27,7 @@ class RoomStore {
   };
 
   private listeners = new Set<Listener>();
+  private isFetching = false;
 
   subscribe = (listener: Listener) => {
     this.listeners.add(listener);
@@ -94,7 +95,33 @@ class RoomStore {
       return null;
     }
 
-    const response = await api.fetchRoom(this.state.room.code, this.state.participantId ?? undefined);
+    // Guard: skip if a fetch is already in flight (T020 — prevents request stacking)
+    if (this.isFetching) {
+      return null;
+    }
+
+    this.isFetching = true;
+
+    try {
+      const response = await api.fetchRoom(
+        this.state.room.code,
+        this.state.participantId ?? undefined
+      );
+      this.setRoomSnapshot(response.room);
+      return response.room;
+    } finally {
+      this.isFetching = false;
+    }
+  }
+
+  async startGame() {
+    if (!this.state.room || !this.state.participantId) {
+      return;
+    }
+
+    const response = await this.withLoading(() =>
+      api.startGame(this.state.room!.code, this.state.participantId!)
+    );
     this.setRoomSnapshot(response.room);
     return response.room;
   }

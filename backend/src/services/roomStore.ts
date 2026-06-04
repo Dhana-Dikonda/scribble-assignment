@@ -29,6 +29,8 @@ function generateUniqueCode() {
   return code;
 }
 
+// Last-resort safeguard only — Zod validation rejects empty/whitespace names
+// before reaching this function. This fallback should never fire in practice.
 function displayName(name?: string) {
   return name || "Player";
 }
@@ -54,6 +56,7 @@ export function createRoom(playerName?: string) {
   const room: Room = {
     code: generateUniqueCode(),
     status: "lobby",
+    hostId: participant.id,
     participants: [participant],
     createdAt: now(),
     updatedAt: now()
@@ -102,8 +105,38 @@ export function toRoomSnapshot(room: Room, viewerParticipantId?: string): RoomSn
   return {
     code: room.code,
     status: room.status,
+    hostId: room.hostId,
     participants: room.participants.map((participant) => ({ ...participant })),
     availableWords: listWords(),
     roles: [...STARTER_ROLES]
   };
+}
+
+type StartRoomResult =
+  | { error: "not_found" | "already_started" | "forbidden" | "not_enough_players" }
+  | { room: RoomSnapshot };
+
+export function startRoom(code: string, participantId: string): StartRoomResult {
+  const room = rooms.get(code.toUpperCase());
+
+  if (!room) {
+    return { error: "not_found" };
+  }
+
+  if (room.status !== "lobby") {
+    return { error: "already_started" };
+  }
+
+  if (room.hostId !== participantId) {
+    return { error: "forbidden" };
+  }
+
+  if (room.participants.length < 2) {
+    return { error: "not_enough_players" };
+  }
+
+  room.status = "game";
+  saveRoom(room);
+
+  return { room: toRoomSnapshot(room) };
 }
