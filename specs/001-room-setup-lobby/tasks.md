@@ -1,0 +1,32 @@
+# Tasks: Scenario 1
+
+- [x] T001 Fix API base URL bug in `frontend/src/services/api.ts`
+- [x] T002 Extend `RoomStatus` type in `backend/src/models/game.ts` to `"lobby" | "game" | "results"`
+- [x] T003 Add `hostId: string` field to `Room` interface in `backend/src/models/game.ts`
+- [x] T004 Add `hostId: string` field to `RoomSnapshot` interface in `backend/src/models/game.ts`
+- [x] T005 Mirror `RoomSnapshot` changes in `frontend/src/services/api.ts`
+- [x] T006 Tighten `createRoomSchema.playerName` in `backend/src/api/schemas.ts`
+- [x] T007 Update `createRoom()` in `backend/src/services/roomStore.ts` to set `room.hostId = participant.id`
+- [x] T008 Update `toRoomSnapshot()` in `backend/src/services/roomStore.ts` to include `hostId`
+- [x] T009 Add unit test to `backend/src/services/roomStore.test.ts` verifying hostId
+- [x] T010 Verify `CreateRoomPage.tsx` displays error on empty name
+- [x] T011 Add client-side trim + empty check in `CreateRoomPage.tsx`
+- [x] T011a Annotate/comment `displayName()` fallback in `backend/src/services/roomStore.ts`
+- [x] T012 Tighten `joinRoomSchema.playerName` in `backend/src/api/schemas.ts`
+- [x] T013 Add unit test to `backend/src/api/schemas.test.ts` for empty/whitespace names
+- [x] T014 Verify `joinRoom()` handler returns 404 for unknown codes
+- [x] T015 Add client-side validation in `JoinRoomPage.tsx`
+- [x] T016 Confirm error display in `JoinRoomPage.tsx`
+- [x] T016a Verify room code normalisation
+- [x] T017 Add `useEffect` polling interval in `LobbyPage.tsx`
+- [x] T018 Check room status and navigate to `/game`
+- [x] T018a Handle poll errors gracefully
+- [x] T019 Clean up manual refresh button
+- [x] T020 Add `fetchRoom()` guard in `frontend/src/state/roomStore.ts`
+- [x] T021 Add `startRoomSchema` to `backend/src/api/schemas.ts`
+- [x] T022 Add `startRoom(code, participantId)` with guards to `backend/src/services/roomStore.ts`
+- [x] T023 Add unit tests for `startRoom()` in `backend/src/services/roomStore.test.ts`
+- [x] T024 Add `POST /:code/start` route handler to `backend/src/api/rooms.ts`
+- [x] T025 Add `api.startGame()` method in `frontend/src/services/api.ts`
+- [x] T026 Add `startGame()` method in `frontend/src/state/roomStore.ts`
+- [x] T027 Update `LobbyPage.tsx` with host-only enabled/disabled start button
