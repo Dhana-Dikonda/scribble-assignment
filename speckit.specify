@@ -89,6 +89,16 @@ Once the game is started by the host, the game transitions into the first round.
 
 ---
 
+### User Story 6 — Gameplay Interaction (Priority: P1)
+
+A round is active. Alice (drawer) draws on her canvas or clears it, and Bob (guesser) sees Alice's drawing update on his canvas within ~2 seconds. Bob submits a guess; incorrect guesses appear in the guess history with score 0, and correct guesses add 100 to Bob's score and transition the room to `"results"` status.
+
+**Why this priority**: The drawing and guessing loop is the core gameplay mechanic of Scribble.
+
+**Independent Test**: Open two tabs. Start the game. Tab 1 (Host/Drawer) draws a line. Within 2 seconds, Tab 2 (Guesser) sees the line. Tab 2 submits an incorrect guess "dog" -> both tabs show "Bob: dog" in the activity panel. Tab 2 submits "castle" (correct) -> both tabs transition to Results, Bob's score becomes 100.
+
+---
+
 ## Edge Cases
 
 - What happens when the room code is valid in format but has mixed case? → Codes are normalized to uppercase on both the backend (`code.toUpperCase()`) and frontend input before any API call.
@@ -97,6 +107,8 @@ Once the game is started by the host, the game transitions into the first round.
 - What happens when the room code alphabet produces a collision? → `generateUniqueCode()` in `roomStore.ts` already handles this with a retry loop.
 - What happens when a player navigates directly to `/game` without a session? → The frontend detects `room === null` and redirects to `/` immediately.
 - What happens when a player refreshes the page during the game? → The page reloads, hooks run, first fetch on mount restores room state, and polling resumes without breaking the flow.
+- What happens if guessers submit guess text containing extra spaces or mixed casing? → The backend trims whitespace and compares case-insensitively, so "  caStLe " matches "castle".
+- What happens if the drawer disconnects or leaves during drawing? → The canvas state remains on the server until the game is restarted or cleared.
 
 ---
 
@@ -124,11 +136,21 @@ Once the game is started by the host, the game transitions into the first round.
 - **FR-206**: The GamePage component MUST display the secret word only to the drawer (host).
 - **FR-207**: The GuessForm component MUST be disabled for the drawer (host) and enabled for guessers.
 - **FR-208**: The polling interval on GamePage MUST be cleared when the component unmounts.
+- **FR-301**: The `Participant` model MUST include a `score` field (integer) initialized to `0`.
+- **FR-302**: The `Room` model MUST support storing drawing strokes as `DrawingStroke[]` and guess history as `GuessEntry[]`.
+- **FR-303**: The backend MUST expose a `POST /rooms/:code/drawing` endpoint to overwrite the room's drawing strokes. Only the host (drawer) can modify the drawing.
+- **FR-304**: The backend MUST expose a `POST /rooms/:code/guesses` endpoint to receive a guess. Only non-host guessers can submit a guess.
+- **FR-305**: Guesses submitted to `POST /rooms/:code/guesses` MUST be trimmed and rejected if empty (400).
+- **FR-306**: Validated guesses MUST be compared case-insensitively with `room.secretWord`. Correct guesses award 100 points to the participant and transition `room.status` to `"results"`.
+- **FR-307**: Every guess (correct or incorrect) MUST append a `GuessEntry` to `room.guesses`.
+- **FR-308**: The GamePage component MUST render an interactive canvas for the drawer and redraw polled canvas strokes for guessers.
 
 ### Key Entities
 
-- **Room**: `code` (4-char uppercase), `status` (`"lobby" | "game" | "results"`), `hostId` (string), `participants` (array), `secretWord` (string — optional), `createdAt`, `updatedAt`.
-- **Participant**: `id` (UUID), `name` (trimmed, non-empty string), `joinedAt` (ISO timestamp).
+- **Room**: `code` (string), `status` (`"lobby" | "game" | "results"`), `hostId` (string), `participants` (array), `secretWord` (string — optional), `drawing` (DrawingStroke[]), `guesses` (GuessEntry[]), `createdAt`, `updatedAt`.
+- **Participant**: `id` (UUID), `name` (string), `score` (number), `joinedAt` (ISO timestamp).
+- **DrawingStroke**: `points` (array of `{ x: number, y: number }`).
+- **GuessEntry**: `playerName` (string), `guess` (string), `isCorrect` (boolean), `timestamp` (string).
 
 ---
 
@@ -143,6 +165,10 @@ Once the game is started by the host, the game transitions into the first round.
 - **SC-201**: Start Game triggers assignment of drawer role to host, and guesser roles to others.
 - **SC-202**: Secret word is deterministically selected and only returned to the host (drawer) in the RoomSnapshot.
 - **SC-203**: Guess input is disabled for the drawer, and enabled for guessers with clear instructions showing who is drawing.
+- **SC-301**: The drawer's freehand mouse/touch strokes are stored on the backend and polled by guessers every ~2 seconds.
+- **SC-302**: Clearing the canvas removes all strokes locally and on the server, showing a blank canvas to all players on the next poll.
+- **SC-303**: Guessers submit guesses which are compared case-insensitively, appearing in the synced Activity feed.
+- **SC-304**: A correct guess transitions the game state to `"results"`, updates the guesser's score by 100, and displays a correct guess message to everyone.
 
 ---
 
@@ -155,3 +181,6 @@ Once the game is started by the host, the game transitions into the first round.
 - `RoomStatus` will be extended from `"lobby"` to `"lobby" | "game" | "results"` in `backend/src/models/game.ts`.
 - Duplicate-join (same player joining twice) produces a separate participant entry; deduplication is out of scope.
 - The secret word index is computed modulo `STARTER_WORDS.length` to avoid out-of-bounds access.
+- Canvas coordinates are scaled relative to a fixed canvas aspect ratio (e.g. 800x500) to ensure uniform drawing rendering across different viewport sizes.
+- Round ends immediately on the first correct guess; score is updated by exactly 100.
+- Drawer does not receive any points for a correct guess; only guessers receive points.

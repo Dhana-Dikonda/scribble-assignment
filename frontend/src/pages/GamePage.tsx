@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../services/api";
 import { Card } from "../components/Card";
+import { DrawingCanvas } from "../components/DrawingCanvas";
 import { GuessForm } from "../components/GuessForm";
 import { ResultPanel } from "../components/ResultPanel";
 import { RoomCodeBadge } from "../components/RoomCodeBadge";
@@ -58,6 +59,14 @@ export function GamePage() {
     };
   }, [room?.code]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const handleRestart = async () => {
+    try {
+      await roomStore.restartGame();
+    } catch (err) {
+      console.error("Failed to restart game:", err);
+    }
+  };
+
   if (!room) {
     return null;
   }
@@ -66,6 +75,7 @@ export function GamePage() {
   const isDrawer = participantId === room.hostId;
   const drawer = room.participants.find((participant) => participant.id === room.hostId) ?? null;
   const drawerName = drawer?.name ?? "Host";
+  const correctGuess = room.guesses?.find((g) => g.isCorrect) ?? null;
 
   return (
     <section className="panel game-page">
@@ -73,7 +83,11 @@ export function GamePage() {
         <div className="game-page__header-left">
           <span className="section-kicker">Round 1</span>
           <h1 className="game-page__title">
-            {isDrawer ? "You are drawing!" : `${drawerName} is drawing!`}
+            {room.status === "results"
+              ? "Round Completed!"
+              : isDrawer
+              ? "You are drawing!"
+              : `${drawerName} is drawing!`}
           </h1>
         </div>
         <RoomCodeBadge code={room.code} />
@@ -86,24 +100,38 @@ export function GamePage() {
         </aside>
 
         <div className="game-page__main">
-          {isDrawer && (
-            <div className="word-banner">
-              <span className="word-banner__label">Your secret word to draw:</span>
-              <h2 className="word-banner__word">{room.availableWords?.[0] ?? "..."}</h2>
+          {room.status === "results" ? (
+            <div className="word-banner" style={{ background: 'linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%)', border: '1px solid #6ee7b7' }}>
+              <span className="word-banner__label" style={{ color: '#065f46' }}>Round Completed!</span>
+              <h2 className="word-banner__word" style={{ color: '#064e3b' }}>
+                Word was: {room.availableWords?.[0] ?? "..."}
+              </h2>
+              {correctGuess && (
+                <p style={{ color: '#047857', fontWeight: '600', marginTop: '4px', margin: 0 }}>
+                  Guessed by <strong>{correctGuess.playerName}</strong>!
+                </p>
+              )}
             </div>
-          )}
+          ) : (
+            <>
+              {isDrawer && (
+                <div className="word-banner">
+                  <span className="word-banner__label">Your secret word to draw:</span>
+                  <h2 className="word-banner__word">{room.availableWords?.[0] ?? "..."}</h2>
+                </div>
+              )}
 
-          {!isDrawer && (
-            <div className="guesser-banner">
-              <span className="guesser-banner__indicator" />
-              <span><strong>{drawerName}</strong> is drawing...</span>
-            </div>
+              {!isDrawer && (
+                <div className="guesser-banner">
+                  <span className="guesser-banner__indicator" />
+                  <span><strong>{drawerName}</strong> is drawing...</span>
+                </div>
+              )}
+            </>
           )}
 
           <Card title="Canvas">
-            <div className="canvas-placeholder" style={{ minHeight: '500px', backgroundColor: '#ffffff', border: '1px solid #e5e7eb', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#6b7280' }}>
-              {isDrawer ? "Draw your word on the canvas!" : "Waiting for drawer..."}
-            </div>
+            <DrawingCanvas isDrawer={isDrawer && room.status === "game"} drawing={room.drawing || []} />
           </Card>
         </div>
 
@@ -128,12 +156,17 @@ export function GamePage() {
           </Card>
 
           <Card title="Your Guess">
-            <GuessForm disabled={isDrawer} />
+            <GuessForm disabled={isDrawer || room.status === "results"} />
           </Card>
         </aside>
       </div>
 
       <div className="button-row">
+        {isDrawer && room.status === "results" && (
+          <button className="button button--primary" onClick={handleRestart}>
+            Restart Game
+          </button>
+        )}
         <button className="button button--secondary" onClick={() => navigate("/lobby")}>
           Exit Game
         </button>

@@ -85,3 +85,30 @@
 - [x] T109 Run `cd backend && npm run build` and `cd frontend && npm run build` to verify compilation
 - [x] T110 Run `cd backend && npm test` to verify all tests pass
 - [x] T111 Commit changes for Scenario 2 with a descriptive message
+
+---
+
+## Phase 8: Gameplay Interaction (Scenario 3)
+
+### Backend — Scores, Drawings, Guesses API
+- [ ] T201 [US6] Add `score` to `Participant`, define `DrawingStroke`/`GuessEntry`, and add `drawing`/`guesses` to `Room`/`RoomSnapshot` in `backend/src/models/game.ts`
+- [ ] T202 [US6] In `backend/src/services/roomStore.ts`, initialize participant score to `0`, and initialize `drawing` / `guesses` list. Map them in `toRoomSnapshot()`
+- [ ] T203 [US6] Add Zod schemas `submitDrawingSchema` and `submitGuessSchema` to `backend/src/api/schemas.ts`
+- [ ] T204 [US6] Add `POST /:code/drawing` (overwrites drawing) and `POST /:code/guesses` (checks guess, updates score, sets status to results if correct) to `backend/src/api/rooms.ts`
+- [ ] T205 [US6] Add backend unit tests in `backend/src/services/roomStore.test.ts` to verify drawing updates, guess scoring, and status transitions
+
+### Frontend — API client & Canvas Component
+- [ ] T206 [US6] Mirror models and add `submitDrawing`/`submitGuess` API client methods to `frontend/src/services/api.ts`
+- [ ] T207 [US6] Add `submitDrawing` and `submitGuess` store actions to `frontend/src/state/roomStore.ts`
+- [ ] T208 [US6] Create `frontend/src/components/DrawingCanvas.tsx` supporting interactive 800x500 canvas drawing for the drawer and polled redraws for guessers
+- [ ] T209 [US6] Update `frontend/src/pages/GamePage.tsx` to render `<DrawingCanvas />` and pass scores/guesses to Scoreboard/ResultPanel
+
+### Frontend — Scoreboard, Guesses, Forms Integration
+- [ ] T210 [US6] Wire `GuessForm.tsx` to submit guesses to `roomStore.submitGuess` and handle input clear/error state
+- [ ] T211 [US6] Update `Scoreboard.tsx` to sort participants by score descending and display them dynamically
+- [ ] T212 [US6] Update `ResultPanel.tsx` to display scrolled guess entries from guess history with correct highlight
+
+### Verification & Validation
+- [ ] T213 Run compilation checks via builds in backend and frontend
+- [ ] T214 Run vitest tests in backend and frontend to verify logic correctness
+- [ ] T215 Commit and push Scenario 3 changes with a descriptive message

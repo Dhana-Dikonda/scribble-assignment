@@ -137,19 +137,27 @@ Non-host players: lobby poll detects status "game" → navigate("/game")
 
 Changes must be applied in this order to avoid breaking the running app at any step:
 
-1. Fix API base URL bug (frontend `api.ts`)
-2. Extend `RoomStatus` type and `Room`/`RoomSnapshot` models (backend `game.ts`)
-3. Mirror `RoomSnapshot` type update in frontend `api.ts`
-4. Tighten Zod name validation schemas (backend `schemas.ts`)
-5. Add `hostId` to `createRoom()` in `roomStore.ts` (backend)
-6. Update `toRoomSnapshot()` to include `hostId` (backend)
-7. Add `POST /rooms/:code/start` route handler (backend `rooms.ts`)
-8. Register the new route — already covered by `createRoomsRouter()` mounting at `/rooms`
-9. Replace manual Lobby refresh with `setInterval` polling (frontend `LobbyPage.tsx`)
-10. Add host detection and Start Game button logic (frontend `LobbyPage.tsx`)
-11. Add auto-navigate when poll returns `status === "game"` (frontend `LobbyPage.tsx`)
-12. Add `startGame()` method to `RoomStore` (frontend `roomStore.ts`)
-13. Add `api.startGame()` method (frontend `api.ts`)
+1. Fix API base URL bug (frontend `api.ts`) [done]
+2. Extend models and statuses (backend `game.ts`) [done]
+3. Mirror snapshot update (frontend `api.ts`) [done]
+4. Tighten Zod name validation schemas (backend `schemas.ts`) [done]
+5. Add `hostId` to `createRoom()` (backend `roomStore.ts`) [done]
+6. Update `toRoomSnapshot()` (backend `roomStore.ts`) [done]
+7. Add `POST /rooms/:code/start` route handler (backend `rooms.ts`) [done]
+8. Replace manual Lobby refresh with polling (frontend `LobbyPage.tsx`) [done]
+9. Add host-only Start Game button logic (frontend `LobbyPage.tsx`) [done]
+10. Add auto-navigate to `/game` (frontend `LobbyPage.tsx`) [done]
+11. Add `startGame()` method to `RoomStore` (frontend `roomStore.ts`) [done]
+12. Add `api.startGame()` method (frontend `api.ts`) [done]
+13. Implement active GamePage polling and role rendering (frontend `GamePage.tsx`) [done]
+14. Add scores to `Participant`, drawing/guesses to `Room` (backend `game.ts`)
+15. Initialize score, drawing, and guesses (backend `roomStore.ts`)
+16. Add schemas for drawings and guesses (backend `schemas.ts`)
+17. Add routes `POST /drawing` and `POST /guesses` (backend `rooms.ts`)
+18. Add API client and Store support for drawings/guesses (frontend `api.ts`, `roomStore.ts`)
+19. Create `<DrawingCanvas>` component (frontend `DrawingCanvas.tsx` [NEW])
+20. Wire `<DrawingCanvas>` and state variables into `GamePage.tsx`
+21. Update Scoreboard, ResultPanel, and GuessForm components to display dynamic data
 
 ---
 
@@ -158,62 +166,54 @@ Changes must be applied in this order to avoid breaking the running app at any s
 ### Backend
 
 #### [MODIFY] `backend/src/models/game.ts`
-- Extend `RoomStatus` from `"lobby"` to `"lobby" | "game" | "results"`
-- Add `hostId: string` to `Room` interface
-- Add `hostId: string` to `RoomSnapshot` interface
+- Add `score: number` to `Participant` interface.
+- Add `DrawingStroke` and `GuessEntry` interfaces.
+- Add `drawing: DrawingStroke[]` and `guesses: GuessEntry[]` to `Room` and `RoomSnapshot` interfaces.
 
 #### [MODIFY] `backend/src/api/schemas.ts`
-- Change `createRoomSchema.playerName` from `z.string().optional()` to `z.string().min(1, "Name is required").transform(s => s.trim()).refine(s => s.length > 0, "Name cannot be blank")`
-- Apply same change to `joinRoomSchema.playerName`
-- Add `startRoomSchema` for `POST /rooms/:code/start`: `z.object({ participantId: z.string().min(1) })`
+- Add `submitDrawingSchema` for `POST /rooms/:code/drawing`: `{ participantId: z.string(), drawing: z.array(z.any()) }`.
+- Add `submitGuessSchema` for `POST /rooms/:code/guesses`: `{ participantId: z.string(), guess: z.string().min(1) }`.
 
 #### [MODIFY] `backend/src/services/roomStore.ts`
-- In `createRoom()`: set `room.hostId = participant.id`
-- In `toRoomSnapshot()`: include `hostId: room.hostId` in the returned snapshot
-- Add `startRoom(code, participantId)` function:
-  - Fetch room; return `{ error: "not_found" }` if not found
-  - Return `{ error: "already_started" }` if `room.status !== "lobby"` (FR-111)
-  - Return `{ error: "forbidden" }` if `participantId !== room.hostId`
-  - Return `{ error: "not_enough_players" }` if `participants.length < 2`
-  - Set `room.status = "game"`; call `saveRoom(room)`; return `{ room: snapshot }`
+- Initialize participant score to `0`.
+- Initialize `room.drawing = []` and `room.guesses = []` on room creation.
+- Map `drawing: room.drawing || []` and `guesses: room.guesses || []` in `toRoomSnapshot`.
 
 #### [MODIFY] `backend/src/api/rooms.ts`
-- Add `POST /:code/start` handler (implemented in Scenario 1).
-
-#### [MODIFY] `backend/src/models/game.ts`
-- Add `secretWord?: string` to `Room` interface.
-
-#### [MODIFY] `backend/src/services/roomStore.ts`
-- In `startRoom()`:
-  - Deterministically pick a word: `room.secretWord = STARTER_WORDS[room.participants.length % STARTER_WORDS.length]`.
-- In `toRoomSnapshot(room, viewerParticipantId)`:
-  - Map roles: host gets `"drawer"`, others get `"guesser"`.
-  - For `status === "game"`, if `viewerParticipantId === room.hostId`, return `[room.secretWord]` as `availableWords`. Otherwise, return `[]`.
-  - For `status === "results"`, return `[room.secretWord]` to all players.
+- Add `POST /:code/drawing` handler:
+  - Overwrites `room.drawing` with the posted strokes.
+- Add `POST /:code/guesses` handler:
+  - Validates and trims guess. Matches case-insensitively with `secretWord`.
+  - Appends `GuessEntry` to `guesses`. If correct, awards 100 points and sets status to `"results"`.
 
 ---
 
 ### Frontend
 
 #### [MODIFY] `frontend/src/services/api.ts`
-- Ensure mirrored snap has correct properties (done).
+- Mirror backend interface changes: `score` on `Participant`, `drawing` and `guesses` on `RoomSnapshot`.
+- Add `api.submitDrawing()` and `api.submitGuess()` client methods.
 
 #### [MODIFY] `frontend/src/state/roomStore.ts`
-- Ensure mirrored functions are available.
+- Add `submitDrawing(drawing)` and `submitGuess(guess)` actions to `RoomStore`.
+
+#### [NEW] `frontend/src/components/DrawingCanvas.tsx`
+- Create component supporting freehand canvas sketching (scaled internally to 800x500).
+- If drawer, attach mouse listeners to draw on canvas and send strokes via `roomStore.submitDrawing` on mouse up / clear.
+- If guesser, redraw lines on canvas from polled `room.drawing` array.
 
 #### [MODIFY] `frontend/src/pages/GamePage.tsx`
-- Implement active polling mechanism:
-  - Poll every 2 seconds via `setInterval` calling `roomStore.fetchRoom()`.
-  - If status becomes `"lobby"`, navigate back to `/lobby`.
-- Derive role: `const isDrawer = participantId === room.hostId`.
-- Derive drawer name: `const drawerName = room.participants.find(p => p.id === room.hostId)?.name || "Host"`.
-- UI updates:
-  - Drawer sees: "Your word to draw: {room.availableWords[0]}"
-  - Guesser sees: "{drawerName} is drawing..."
-  - Pass `disabled={isDrawer}` to `GuessForm`.
+- Embed `<DrawingCanvas />` inside canvas container.
+- Pass `room.guesses` to `<ResultPanel />` and `room.participants` to `<Scoreboard />`.
 
 #### [MODIFY] `frontend/src/components/GuessForm.tsx`
-- Add support for `disabled` prop so input and button are properly disabled when drawer is viewing.
+- Wire submission to call `roomStore.submitGuess()`. Clear guess text on success.
+
+#### [MODIFY] `frontend/src/components/Scoreboard.tsx`
+- Map participants, sort them by score descending, and display in the scoreboard list.
+
+#### [MODIFY] `frontend/src/components/ResultPanel.tsx`
+- Map guess history and display list in scrollable container, highlighting correct guesses.
 
 ---
 
@@ -221,18 +221,18 @@ Changes must be applied in this order to avoid breaking the running app at any s
 
 ### Automated
 - `backend/src/services/roomStore.test.ts`:
-  - Add test: `startRoom()` sets deterministic word based on participant count.
-  - Add test: `toRoomSnapshot()` returns secret word only for the drawer.
-- `backend/src/api/schemas.test.ts`: existing schema validation tests.
-- `frontend/src/services/api.test.ts`: existing URL prefix check.
+  - Add test: correct guess updates score by 100, sets status to `"results"`, and records correct guess.
+  - Add test: incorrect guess keeps score unchanged and records incorrect guess.
+  - Add test: `submitDrawing` updates strokes.
 
 ### Manual (2-tab verification)
-1. Start backend and frontend.
-2. Tab 1: Create room with name `"Alice"` (Host) -> note room code.
-3. Tab 2: Join room with name `"Bob"` and code.
-4. Tab 1: Start game -> both tabs navigate to `/game`.
-5. Tab 1 (Alice): Verify "Your word to draw: castle" (or other deterministic word) is shown. Verify guess input is disabled.
-6. Tab 2 (Bob): Verify "Alice is drawing..." is shown. Verify guess input is enabled. Verify secret word is NOT displayed.
+1. Tab 1: Create room as Alice (host).
+2. Tab 2: Join room as Bob.
+3. Tab 1: Start game.
+4. Tab 1 (Alice): Draw line on canvas -> verify Bob sees it automatically.
+5. Tab 1 (Alice): Click clear canvas -> verify Bob's canvas becomes empty.
+6. Tab 2 (Bob): Type incorrect guess "guitar" -> verify both guess lists display Bob's guess as incorrect (grey text) and scores stay 0.
+7. Tab 2 (Bob): Type correct guess "castle" -> verify both screens transition to Results, Bob's score is updated to 100, and correct guess is logged.
 
 ---
 
@@ -245,3 +245,4 @@ Changes must be applied in this order to avoid breaking the running app at any s
 | Non-host accidentally calls `/start` if UI bug exists | Backend enforces `hostId` check — 403 returned regardless of UI state |
 | Base URL fix breaks existing local dev setup | Fix is a 1-char change removing `/bug`; no env var needed for default local dev |
 | Secret word exposed in JS bundle or page source | Snapshot filtering ensures the secret word is only sent over the network to the drawer's client |
+| Large drawing payload slows down polling requests | Limit coordinates resolution; clear canvas clears strokes; payload is very small (few KBs max) |
