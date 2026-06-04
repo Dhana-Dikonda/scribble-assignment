@@ -1,0 +1,120 @@
+# Scribble Assignment Constitution
+
+## Core Principles
+
+### I. TypeScript First
+All new code — backend and frontend — must be fully typed TypeScript. `any` is
+forbidden; use `unknown` for truly dynamic values. Type definitions live in
+`backend/src/models/` and are mirrored in `frontend/src/services/api.ts` only
+where strictly needed for the HTTP contract.
+
+### II. In-Memory Only, No Persistence
+All game state is held in the backend's `Map<string, Room>`. No database, no
+file storage, no localStorage for server state. Restarting the backend resets
+all rooms. The frontend may hold local session state (participant ID, current
+room snapshot) in the React store only for the duration of a browser session.
+
+### III. HTTP Polling — No WebSockets
+All real-time synchronization (lobby participant list, canvas strokes, guess
+history, game status transitions) is achieved exclusively through periodic HTTP
+GET polling at approximately a 2-second cadence. WebSockets, Server-Sent
+Events, long-polling, and any push protocol are strictly forbidden.
+
+### IV. Validation at the Boundary
+Every HTTP request body and query parameter is validated with Zod schemas
+before any business logic runs. Empty or whitespace-only player names must be
+rejected at the API layer with a clear 400 error. The frontend must display
+these error messages; it must never crash on API failures.
+
+### V. Incremental, Scenario-Gated Delivery
+Work proceeds scenario by scenario in the order defined in the README:
+1. Room Setup & Lobby  
+2. Game Start & Drawer Flow  
+3. Gameplay Interaction  
+4. Result, Restart & Final Validation  
+
+A later scenario is not started until the current one passes manual validation
+with two browser tabs.
+
+---
+
+## Hard Constraints (Out of Scope — Do Not Build)
+
+The following are forbidden regardless of perceived benefit. Including any of
+these in a spec, plan, or implementation is a blocking violation:
+
+- WebSockets, Socket.io, or any real-time push mechanism
+- Databases (SQL, NoSQL, SQLite) or any form of persistent storage
+- Authentication, sessions, JWT, or OAuth
+- Multiple drawer rotation or multi-round timers / countdowns
+- Custom or random word packs (only the 5 starter words may be used)
+- Spectator mode, moderation (kick/mute), room passwords, invite links
+- New state-management or routing libraries beyond the starter (`zustand`
+  or any new global store is forbidden unless already present)
+- Deployment, CI, Docker, or hosting work
+- Rewriting the starter from scratch or unjustified top-level dependencies
+
+---
+
+## Engineering Standards
+
+### Backend (`/backend`)
+- Routes live in `src/api/`; business logic in `src/services/`; types in
+  `src/models/`.
+- Use centralized error handling via the existing `errorHandler` middleware.
+- Keep the in-memory `Room` footprint minimal; remove no-longer-needed fields
+  when a round ends or resets.
+- Run `npm run build` in `/backend` before marking any scenario complete.
+
+### Frontend (`/frontend`)
+- Use functional components and React hooks only (`useState`, `useEffect`,
+  `useInterval`-equivalent, etc.).
+- Complex state (room session, participant ID) lives in
+  `src/state/roomStore.ts`. Do not introduce a second store.
+- Styles go in `src/styles/app.css` or CSS modules. No inline style objects
+  except for trivial one-off overrides.
+- Run `npm run build` in `/frontend` before marking any scenario complete.
+
+### Determinism
+Game-rule outcomes (word selection, score calculation) must be deterministic
+and produce the same result given the same inputs. No `Math.random()` in game
+logic. Word selection uses a fixed-index calculation:
+`STARTER_WORDS[participants.length % STARTER_WORDS.length]`.
+
+---
+
+## AI Usage Rules
+
+- AI-generated code must be reviewed line-by-line before committing.
+- AI must not introduce out-of-scope dependencies or patterns.
+- Every AI-suggested change must be traceable to a specific acceptance criterion
+  in `speckit.specify`.
+- If the AI proposes a deviation from this constitution, the deviation must be
+  documented and explicitly approved before it is committed.
+- Discovery notes (`discovery.md`) must be updated whenever new gaps or
+  assumptions are uncovered during implementation.
+
+---
+
+## Review Discipline
+
+- Each commit must be traceable to a specific task in `speckit.tasks`.
+- No commit may bundle unrelated changes.
+- The scenario is only marked done after manual verification:
+  two browser tabs can complete the full flow described in the scenario.
+- Deviations between the spec and the implementation must be documented in
+  the relevant `speckit.specify` section before the PR is raised.
+
+---
+
+## Governance
+
+This constitution supersedes all other conventions. Amendments require:
+1. A documented reason for the change.
+2. An update to `speckit.specify` and `speckit.plan` if the change affects
+   scope or behaviour.
+3. A new constitution version entry below.
+
+All PRs must include a note confirming compliance with this constitution.
+
+**Version**: 1.0.0 | **Ratified**: 2026-06-04 | **Last Amended**: 2026-06-04
