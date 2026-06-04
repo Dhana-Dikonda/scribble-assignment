@@ -84,4 +84,4 @@
 ### Verification & Validation
 - [x] T109 Run `cd backend && npm run build` and `cd frontend && npm run build` to verify compilation
 - [x] T110 Run `cd backend && npm test` to verify all tests pass
-- [/] T111 Commit changes for Scenario 2 with a descriptive message
+- [x] T111 Commit changes for Scenario 2 with a descriptive message
